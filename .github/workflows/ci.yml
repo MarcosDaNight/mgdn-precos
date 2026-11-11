@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Plano B confiável: `gh workflow run ci --ref main` constrói, testa e publica a imagem da main
+  # mesmo quando um push não dispara o CI (aconteceu neste repositório, sem causa conhecida).
+  workflow_dispatch:
   schedule:
     - cron: "0 9 * * 1" # varredura semanal: sai CVE nova sem commit novo
 
@@ -63,7 +66,7 @@ jobs:
           for i in $(seq 1 20); do curl -fsS localhost:8080/healthz && exit 0; sleep 1; done
           docker logs precos-smoke; exit 1
       - name: Login no ghcr.io
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -71,7 +74,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publicar
         id: push
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
