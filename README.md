@@ -46,12 +46,24 @@ Limites: o ML não separa Pix (o preço da API é o valor à vista) e não infor
 `installment` vale só para lojas que informam parcelas. **Escrito contra a documentação, sem token para
 testar contra a API real: valide com `ml-check` na primeira vez.**
 
+## O que cada loja informa (e o que isso muda nas metas)
+
+| Loja | Pix / à vista | Parcelas sem juros |
+|---|---|---|
+| **KaBuM** | sim (`priceWithDiscount`, o Pix) | sim (`installment`: nº de parcelas e valor, `hasFee`) |
+| **Mercado Livre** (API) | só o valor à vista (a API não separa o Pix) | **não informa** |
+
+Uma meta `installment` só vale para quem informa parcelas. Numa loja que não informa (o Mercado Livre), vale
+**só a meta Pix/à vista** (R$ 3.700 no console), e a mensagem do alerta diz isso com todas as letras.
+
 ## Confiabilidade
 
 - **Preço absurdo não vira alerta de primeira:** uma leitura abaixo de 50% da mediana recente (com pelo menos
   3 leituras de histórico) é gravada como `preço suspeito` e só vale se a **próxima leitura** da mesma URL
   chegar a até 3% dela. Isso evita um falso "COMPRAR" por erro de parser e não contamina o mínimo histórico.
 - **Silêncio avisa:** o heartbeat só sai depois de coletar de verdade pelo menos uma página.
+- **Sem `NTFY_URL`, nada conta como enviado**: o aviso só é impresso e a deduplicação de 24 h não o engole;
+  quando o ntfy for configurado, o alerta sai normalmente.
 - Falha de uma URL não derruba as outras; 3 falhas seguidas avisam no ntfy; loja que bloqueia o UA é desativada.
 - Limites honestos: o preço da página pode diferir do final (frete, cupom, estoque na hora de pagar).
 

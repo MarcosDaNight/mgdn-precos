@@ -110,3 +110,22 @@ def test_mensagem_traz_o_que_foi_pedido(real_config, db):
                   "Meta: Pix R$ 3.700,00 / parcelado R$ 3.800,00", "Mínimo histórico: R$ 3.650,00",
                   "meta atingida", "novo mínimo histórico", "Veredito: COMPRAR", "Recomendação: pagar no Pix"):
         assert piece in msg, piece
+
+
+def test_loja_sem_parcelas_explica_que_a_meta_parcelada_nao_se_aplica(real_config, db):
+    a = ev(real_config, db, "console", price_pix=3650.0)  # só à vista, como no Mercado Livre
+    _, msg, _ = alerts.format_alert(a)
+    assert "Parcelado: não informado por esta loja" in msg
+    assert "a meta parcelada de R$ 3.800,00 não se aplica aqui" in msg
+    assert "vale só a meta Pix/à vista de R$ 3.700,00" in msg
+
+
+def test_produto_sem_meta_parcelada_nao_fala_dela(real_config, db):
+    a = ev(real_config, db, "zelda-ocarina", price_pix=399.0)
+    _, msg, _ = alerts.format_alert(a)
+    assert "Parcelado: sem parcelamento sem juros informado" in msg and "não se aplica" not in msg
+
+
+def test_so_a_vista_acima_da_meta_pix_nao_dispara_mesmo_perto_da_meta_parcelada(real_config, db):
+    # R$ 3.750 à vista: acima dos R$ 3.700 do Pix, e sem parcelas a meta de R$ 3.800 parcelado não vale
+    assert ev(real_config, db, "console", price_pix=3750.0) is None

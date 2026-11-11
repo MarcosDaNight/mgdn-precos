@@ -15,7 +15,10 @@ class Notifier(Protocol):
 
 
 class ConsoleNotifier:
-    """Para --dry-run: mostra o que seria enviado, sem enviar."""
+    """Para --dry-run (e para a falta de NTFY_URL): mostra o que seria enviado, sem enviar.
+    `delivers = False`: o que sai aqui NÃO conta como avisado, para a deduplicação não engolir o alerta real depois."""
+
+    delivers = False
 
     def send(self, title, message, *, priority=3, tags=(), click=None):
         print(f"--- ntfy (prioridade {priority}) {' '.join(tags)}\n{title}\n{message}" + (f"\n{click}" if click else ""))

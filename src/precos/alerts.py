@@ -126,14 +126,22 @@ def target_text(product: Product) -> str:
     return " / ".join(parts) or "sem meta"
 
 
+def _parcel_text(product: Product, o: Offer) -> str:
+    """Parcelado sem juros, ou uma explicação de por que a meta parcelada não se aplica a esta loja."""
+    if o.installment_total:
+        return f"{o.installments}x {brl(o.installment_amount)} = {brl(o.installment_total)} sem juros"
+    t = product.targets
+    if t.installment is None:
+        return "sem parcelamento sem juros informado"
+    cash = t.pix if t.pix is not None else t.any
+    rule = f"vale só a meta Pix/à vista de {brl(cash)}" if cash is not None else "sem meta à vista definida"
+    return f"não informado por esta loja (a meta parcelada de {brl(t.installment)} não se aplica aqui; {rule})"
+
+
 def format_alert(a: Alert) -> tuple[str, str, int]:
     """(título, mensagem, prioridade do ntfy)."""
     o = a.offer
-    parcel = (
-        f"{o.installments}x {brl(o.installment_amount)} = {brl(o.installment_total)} sem juros"
-        if o.installment_total
-        else "sem parcelado sem juros"
-    )
+    parcel = _parcel_text(a.product, o)
     lines = [
         a.product.name,
         f"Pix/à vista: {brl(o.price_pix)}",

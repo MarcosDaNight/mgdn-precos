@@ -41,7 +41,7 @@ def _notifier(dry_run: bool):
     url = env_or_file("NTFY_URL")
     if dry_run or not url:
         if not dry_run:
-            logging.warning("NTFY_URL não definida: usando o modo de teste (só imprime)")
+            logging.warning("NTFY_URL não definida: avisos só são impressos e NÃO contam como enviados (nada é perdido)")
         return ConsoleNotifier()
     return NtfyNotifier(url)
 
