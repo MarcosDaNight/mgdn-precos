@@ -30,7 +30,11 @@ def _iso(dt: datetime) -> str:
 
 
 class DB:
-    def __init__(self, path: str = ":memory:"):
+    def __init__(self, path: str = ":memory:", readonly: bool = False):
+        if readonly:  # painel e /healthz: outra thread, outra conexão, nunca escreve
+            self.conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            self.conn.row_factory = sqlite3.Row
+            return
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode = WAL")
@@ -77,6 +81,18 @@ class DB:
             " AND o.available = 1 AND o.best_price IS NOT NULL ORDER BY o.best_price",
             (product_id, _iso(since), product_id),
         ).fetchall()
+
+    def latest_any_by_store(self, product_id: str) -> list[sqlite3.Row]:
+        """Última leitura aceita de cada loja, mesmo esgotada (o painel mostra o que está esgotado)."""
+        return self.conn.execute(
+            "SELECT o.* FROM offer o JOIN (SELECT store, MAX(ts) AS ts FROM offer WHERE product_id = ? AND accepted = 1"
+            " GROUP BY store) m ON o.store = m.store AND o.ts = m.ts WHERE o.product_id = ? AND o.accepted = 1"
+            " ORDER BY o.available DESC, o.best_price", (product_id, product_id)).fetchall()
+
+    def recent_rejections(self, since: datetime, limit: int = 15) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT ts, product_id, store, title, seller, reject_reason, best_price, url FROM offer WHERE accepted = 0"
+            " AND ts >= ? ORDER BY ts DESC LIMIT ?", (_iso(since), limit)).fetchall()
 
     # --- alertas -------------------------------------------------------------------------
     def last_alert(self, product_id: str, store: str) -> sqlite3.Row | None:

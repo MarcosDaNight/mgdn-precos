@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1" # varredura semanal: sai CVE nova sem commit novo
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q
+      - run: python -m precos check-config
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build (sem publicar)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: mgdn-precos:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Mesma política da plataforma (ADR 0008): bloqueia CRITICAL com correção publicada.
+      - name: Trivy (bloqueia CRITICAL com correção)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: mgdn-precos:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      # Config SEM lojas: o CI nunca faz requisições às lojas de verdade.
+      - name: Smoke test (sobe e responde em /healthz)
+        run: |
+          docker run -d --name precos-smoke -p 8080:8080 \
+            -v "$PWD/tests/smoke.yaml:/app/smoke.yaml:ro" -e PRECOS_CONFIG=/app/smoke.yaml mgdn-precos:ci
+          for i in $(seq 1 20); do curl -fsS localhost:8080/healthz && exit 0; sleep 1; done
+          docker logs precos-smoke; exit 1
+      - name: Login no ghcr.io
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publicar
+        id: push
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/marcosdanight/mgdn-precos:${{ github.sha }}
+            ghcr.io/marcosdanight/mgdn-precos:latest
+          provenance: mode=max
+          cache-from: type=gha
