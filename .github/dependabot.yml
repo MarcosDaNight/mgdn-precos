@@ -7,9 +7,9 @@ updates:
     directory: /
     schedule: { interval: weekly }
     ignore:
-      # Python só sobe de versão menor/major por decisão manual.
+      # A versão do Python é decisão manual: um "minor" do runtime é uma versão da linguagem (3.12 -> 3.15).
       - dependency-name: python
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }

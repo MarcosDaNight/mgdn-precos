@@ -15,9 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Versão do Python = a do Dockerfile (o que se testa é o que vai para produção)
+        id: py
+        run: echo "v=$(grep -m1 '^FROM python:' Dockerfile | sed -E 's/FROM python:([0-9]+\.[0-9]+).*/\1/')" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: ${{ steps.py.outputs.v }}
           cache: pip
       - run: pip install -e '.[dev]'
       - run: python -m pytest -q
@@ -48,6 +51,10 @@ jobs:
           severity: CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+      - name: A imagem não pode ter pip (runtime enxuto)
+        run: |
+          docker run --rm --entrypoint python mgdn-precos:ci -c \
+            "import importlib.util, sys; sys.exit(1 if importlib.util.find_spec('pip') else 0)"
       # Config SEM lojas: o CI nunca faz requisições às lojas de verdade.
       - name: Smoke test (sobe e responde em /healthz)
         run: |

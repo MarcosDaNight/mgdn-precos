@@ -1,7 +1,7 @@
 name: dependabot-auto-merge
 
 # Auto-merge do Dependabot, mesma política da mgdn-platform (ADR 0011):
-# PATCH de tudo e MINOR de imagens de container. O merge nativo do GitHub só acontece
+# PATCH de tudo e MINOR de imagens de container (exceto o runtime Python: ver abaixo). O merge nativo do GitHub só acontece
 # depois dos checks obrigatórios da main (`test`: testes e config; `image`: build
 # da imagem, Trivy e smoke test). Major, e minor de npm/Actions, ficam para revisão manual.
 on: pull_request
@@ -22,8 +22,12 @@ jobs:
         env:
           UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
           ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          DEPS: ${{ steps.meta.outputs.dependency-names }}
         run: |
-          if [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]] ||
+          # Runtime de linguagem (imagem python): um "minor" é uma versão da linguagem. Sempre manual.
+          if [[ ",$DEPS," == *",python,"* ]]; then
+            echo "auto=false" >>"$GITHUB_OUTPUT"
+          elif [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]] ||
              [[ "$UPDATE_TYPE" == "version-update:semver-minor" && "$ECOSYSTEM" == docker* ]]; then
             echo "auto=true" >>"$GITHUB_OUTPUT"
           else
