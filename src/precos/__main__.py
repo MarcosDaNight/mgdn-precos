@@ -114,6 +114,7 @@ def main(argv=None) -> int:
         print(run_collection(cfg, db, _collectors(cfg, db), notifier, now))
     else:
         collectors = _collectors(cfg, db)
+        db.del_state("last_attempt")  # reiniciou: se faltou coletar, tenta já (sem esperar o intervalo mínimo)
         hc = env_or_file("HEALTHCHECK_URL")
         port = int(os.environ.get("PORT", "8080"))
         serve(cfg, args.db, port)

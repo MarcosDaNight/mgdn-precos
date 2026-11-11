@@ -140,6 +140,9 @@ class DB:
         self.conn.execute("UPDATE failure SET notified = 1 WHERE key = ?", (key,))
         self.conn.commit()
 
+    def failures(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT key, consecutive, last_error FROM failure ORDER BY consecutive DESC, key").fetchall()
+
     def clear_failure(self, key: str) -> None:
         self.conn.execute("DELETE FROM failure WHERE key = ?", (key,))
         self.conn.commit()

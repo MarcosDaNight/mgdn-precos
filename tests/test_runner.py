@@ -249,3 +249,61 @@ def test_aviso_de_falha_em_modo_de_teste_nao_marca_como_avisado(db):
     sink = Sink()
     runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=3))
     assert len(sink.sent) == 1 and "falhando" in sink.sent[0][0]  # o aviso real ainda sai
+
+
+# --- uma rodada que aborta não pode deixar o app cego por 6 h ----------------------------------------
+def test_erro_no_processamento_de_uma_url_nao_derruba_a_rodada(db, monkeypatch):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    real = runner.alerts.evaluate
+
+    def boom(product, offer, *a, **k):
+        if offer.url == A1:
+            raise ValueError("bug no alerta")
+        return real(product, offer, *a, **k)
+    monkeypatch.setattr(runner.alerts, "evaluate", boom)
+    rep = runner.run_collection(cfg, db, {"fake": col}, Sink(), NOW)
+    assert rep.failed == 1
+    assert db.history_count("a") == 1 and db.history_count("b") == 1  # A2 e B1 foram gravadas
+    f = db.failures()
+    assert len(f) == 1 and f[0]["key"].endswith(A1) and "bug no alerta" in f[0]["last_error"]
+
+
+def test_rodada_abortada_nao_marca_coleta_e_e_refeita_depois_do_intervalo_minimo(db, monkeypatch):
+    cfg = make_config()
+    ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    real, calls = runner.run_collection, {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("o serviço caiu no meio da rodada")
+        return real(*a, **k)
+    monkeypatch.setattr(runner, "run_collection", flaky)
+    with pytest.raises(RuntimeError):
+        runner.tick(cfg, db, {"fake": ok}, Sink(), NOW)
+    assert db.get_state("last_collect") is None  # a coleta NÃO foi marcada como feita
+    runner.tick(cfg, db, {"fake": ok}, Sink(), NOW + timedelta(minutes=1))
+    assert calls["n"] == 1  # dentro do intervalo mínimo: não martela as lojas
+    runner.tick(cfg, db, {"fake": ok}, Sink(), NOW + timedelta(minutes=11))
+    assert calls["n"] == 2 and db.get_state("last_collect") is not None
+    assert db.get_state("last_ok") is not None
+
+
+def test_coleta_so_e_marcada_ao_terminar_e_vale_pelo_intervalo_normal(db):
+    cfg = make_config()
+    ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    runner.tick(cfg, db, {"fake": ok}, Sink(), NOW)
+    assert db.get_state("last_collect") == NOW.isoformat()
+    n = len(ok.calls)
+    runner.tick(cfg, db, {"fake": ok}, Sink(), NOW + timedelta(hours=5))  # 6 h de intervalo normal
+    assert len(ok.calls) == n
+
+
+def test_reiniciar_o_servico_limpa_o_intervalo_minimo(db):
+    db.set_state("last_attempt", NOW.isoformat())
+    db.del_state("last_attempt")  # o que o `run` faz ao subir
+    cfg = make_config()
+    ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    runner.tick(cfg, db, {"fake": ok}, Sink(), NOW)
+    assert ok.calls

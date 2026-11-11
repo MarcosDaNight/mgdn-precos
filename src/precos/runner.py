@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import alerts, filters, schedule
 from .collectors.base import Collector
@@ -15,6 +15,7 @@ from .summary import build_summary
 
 log = logging.getLogger(__name__)
 FAILURES_BEFORE_WARNING = 3
+ATTEMPT_COOLDOWN = timedelta(minutes=10)  # rodada que aborta é refeita, sem martelar as lojas
 
 
 @dataclass
@@ -37,6 +38,26 @@ def _notify(notifier: Notifier, *args, **kw) -> bool:
     return getattr(notifier, "delivers", True)
 
 
+def _process(cfg: Config, db: DB, notifier: Notifier, product, store: str, offer, now: datetime, rep: Report) -> None:
+    """Filtros, guarda de preço, alerta e gravação de UMA oferta. Roda dentro do try da URL."""
+    rep.collected += 1
+    verdict = filters.evaluate(product, offer, cfg.default_forbidden)
+    if verdict.ok and alerts.is_suspect(product, offer, db, now, cfg.alerts) and not alerts.confirmed(db, offer, filters.SUSPECT):
+        verdict = filters.Verdict(False, f"{filters.SUSPECT} ({alerts.brl(offer.best_price)}, muito abaixo da mediana recente)")
+        log.warning("%s em %s: espero a próxima leitura para confirmar", verdict.reason, offer.url)
+    alert = alerts.evaluate(product, offer, db, now, cfg.alerts) if verdict.ok else None
+    db.insert_offer(offer, verdict.ok, verdict.reason)
+    if not verdict.ok:
+        rep.rejected += 1
+        log.info("recusada (%s): %s", verdict.reason, offer.title)
+    if alert:
+        title, message, priority = alerts.format_alert(alert)
+        tags = ("moneybag",) if alert.verdict == "COMPRAR" else ("hourglass",)
+        if _notify(notifier, title, message, priority=priority, tags=tags, click=offer.url):
+            db.record_alert(now, product.id, store, offer.best_price, list(alert.reasons))
+            rep.alerts += 1
+
+
 def run_collection(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifier, now: datetime) -> Report:
     """Uma rodada. Cada URL é isolada: o erro de uma não derruba as outras nem os outros coletores."""
     rep = Report()
@@ -52,6 +73,7 @@ def run_collection(cfg: Config, db: DB, collectors: dict[str, Collector], notifi
                 key = f"{store}|{url}"
                 try:
                     offer = collector.fetch(product, url)
+                    _process(cfg, db, notifier, product, store, offer, now, rep)
                 except Blocked as e:
                     reason = str(e)
                     db.set_state(f"disabled:{store}", reason)
@@ -72,22 +94,6 @@ def run_collection(cfg: Config, db: DB, collectors: dict[str, Collector], notifi
                             db.mark_failure_notified(key)
                     continue
                 db.clear_failure(key)
-                rep.collected += 1
-                verdict = filters.evaluate(product, offer, cfg.default_forbidden)
-                if verdict.ok and alerts.is_suspect(product, offer, db, now, cfg.alerts) and not alerts.confirmed(db, offer, filters.SUSPECT):
-                    verdict = filters.Verdict(False, f"{filters.SUSPECT} ({alerts.brl(offer.best_price)}, muito abaixo da mediana recente)")
-                    log.warning("%s em %s: espero a próxima leitura para confirmar", verdict.reason, offer.url)
-                alert = alerts.evaluate(product, offer, db, now, cfg.alerts) if verdict.ok else None
-                db.insert_offer(offer, verdict.ok, verdict.reason)
-                if not verdict.ok:
-                    rep.rejected += 1
-                    log.info("recusada (%s): %s", verdict.reason, offer.title)
-                if alert:
-                    title, message, priority = alerts.format_alert(alert)
-                    tags = ("moneybag",) if alert.verdict == "COMPRAR" else ("hourglass",)
-                    if _notify(notifier, title, message, priority=priority, tags=tags, click=offer.url):
-                        db.record_alert(now, product.id, store, offer.best_price, list(alert.reasons))
-                        rep.alerts += 1
     return rep
 
 
@@ -96,10 +102,15 @@ def tick(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifi
     """Chamado a cada minuto pelo laço: coleta e/ou manda o resumo, se for a hora."""
     now = now or datetime.now(timezone.utc)
     report = None
-    last_collect = db.get_state("last_collect")
-    if schedule.collect_due(now, datetime.fromisoformat(last_collect) if last_collect else None, cfg):
-        db.set_state("last_collect", now.isoformat())  # marca antes: uma rodada lenta não dispara outra
+    last_collect = db.get_state("last_collect")  # só é gravado quando a rodada TERMINA
+    last_attempt = db.get_state("last_attempt")
+    cooling = last_attempt is not None and now - datetime.fromisoformat(last_attempt) < ATTEMPT_COOLDOWN
+    if not cooling and schedule.collect_due(now, datetime.fromisoformat(last_collect) if last_collect else None, cfg):
+        db.set_state("last_attempt", now.isoformat())
         report = run_collection(cfg, db, collectors, notifier, now)
+        # Se a rodada abortar (ou o serviço reiniciar no meio), last_collect não avança e ela é refeita
+        # depois do intervalo mínimo, em vez de o app achar que coletou e ficar 6 h sem tentar.
+        db.set_state("last_collect", now.isoformat())
         log.info("rodada: %s", report)
         if report.collected > 0:
             db.set_state("last_ok", now.isoformat())  # o /healthz mede por aqui, não pela tentativa
