@@ -27,12 +27,14 @@ class Report:
 
 
 def _notify(notifier: Notifier, *args, **kw) -> bool:
+    """True só se o aviso foi ENTREGUE de verdade. Modo de teste (que só imprime) e ntfy fora do ar
+    devolvem False: o alerta não é gravado como enviado e é refeito na rodada seguinte."""
     try:
         notifier.send(*args, **kw)
-        return True
     except Exception:  # um ntfy fora do ar não pode derrubar a coleta
         log.exception("falha ao notificar")
         return False
+    return getattr(notifier, "delivers", True)
 
 
 def run_collection(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifier, now: datetime) -> Report:

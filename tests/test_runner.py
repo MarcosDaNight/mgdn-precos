@@ -206,3 +206,46 @@ def test_heartbeat_com_erro_nao_derruba_a_rodada(db):
         raise RuntimeError("healthchecks fora")
     rep = runner.tick(cfg, db, {"fake": ok}, Sink(), NOW, heartbeat=boom)
     assert rep.collected == 3
+
+
+# --- sem NTFY_URL nada conta como enviado -------------------------------------------------------
+class Printer:
+    """Como o ConsoleNotifier: imprime e não entrega (delivers = False)."""
+    delivers = False
+
+    def __init__(self):
+        self.printed = []
+
+    def send(self, title, message, *, priority=3, tags=(), click=None):
+        self.printed.append(title)
+
+
+def test_modo_de_teste_nao_grava_o_alerta_e_o_real_vem_depois(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: good("a", A1, 90.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    pr = Printer()
+    rep = runner.run_collection(cfg, db, {"fake": col}, pr, NOW)
+    assert pr.printed and rep.alerts == 0 and db.last_alert("a", "fake") is None
+    sink = Sink()  # o ntfy foi configurado: o alerta NÃO foi engolido pela deduplicação
+    runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=1))
+    assert len(sink.sent) == 1 and sink.sent[0][0].startswith("COMPRAR")
+
+
+def test_resumo_em_modo_de_teste_nao_conta_como_enviado(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    runner.tick(cfg, db, {"fake": col}, Printer(), NOW)
+    assert db.get_state("last_summary") is None  # hoje ainda sai o resumo de verdade
+    sink = Sink()
+    runner.tick(cfg, db, {"fake": col}, sink, NOW + timedelta(minutes=1))
+    assert [t for t, *_ in sink.sent] == ["Resumo diário de preços"]
+
+
+def test_aviso_de_falha_em_modo_de_teste_nao_marca_como_avisado(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: FetchError("fora"), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    for i in range(3):
+        runner.run_collection(cfg, db, {"fake": col}, Printer(), NOW + timedelta(hours=i))
+    sink = Sink()
+    runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=3))
+    assert len(sink.sent) == 1 and "falhando" in sink.sent[0][0]  # o aviso real ainda sai
