@@ -1,0 +1,141 @@
+from datetime import timedelta
+
+import pytest
+
+from conftest import NOW, make_config, offer
+from precos import runner
+from precos.collectors.http import Blocked, FetchError
+
+
+class FakeCollector:
+    """Devolve uma Offer pronta por URL, ou levanta a exceção cadastrada."""
+
+    def __init__(self, store, results):
+        self.store, self.results, self.calls = store, results, []
+
+    def fetch(self, product, url):
+        self.calls.append(url)
+        r = self.results[url]
+        if isinstance(r, Exception):
+            raise r
+        return r(product) if callable(r) else r
+
+
+class Sink:
+    def __init__(self, fail=False):
+        self.sent, self.fail = [], fail
+
+    def send(self, title, message, *, priority=3, tags=(), click=None):
+        if self.fail:
+            raise RuntimeError("ntfy fora do ar")
+        self.sent.append((title, message, priority, tags, click))
+
+
+A1, A2, B1, OB = "https://loja.test/a1", "https://loja.test/a2", "https://loja.test/b1", "https://outra.test/b"
+
+
+def good(pid, url, price, title=None):
+    return offer(product_id=pid, url=url, price_pix=price, title=title or ("Acessorio Switch 2" if pid == "a" else "Zelda Switch 2"))
+
+
+def test_rodada_grava_oferta_e_avisa_quando_bate_a_meta(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: good("a", A1, 90.0), A2: good("a", A2, 120.0), B1: good("b", B1, 350.0)})
+    sink = Sink()
+    rep = runner.run_collection(cfg, db, {"fake": col}, sink, NOW)
+    assert (rep.collected, rep.rejected, rep.failed, rep.alerts) == (3, 0, 0, 1)
+    assert len(sink.sent) == 1 and sink.sent[0][0].startswith("COMPRAR · Produto A")
+    assert sink.sent[0][4] == A1  # o link da loja vai como clique
+    assert db.history_count("a") == 2 and db.last_alert("a", "fake")["price"] == 90.0
+
+
+def test_oferta_recusada_fica_registrada_com_motivo_e_nao_avisa(db):
+    cfg = make_config()
+    terceiro = offer(product_id="a", url=A1, price_pix=10.0, title="Acessorio Switch 2", first_party=False, seller="Fulano")
+    col = FakeCollector("fake", {A1: terceiro, A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    sink = Sink()
+    rep = runner.run_collection(cfg, db, {"fake": col}, sink, NOW)
+    assert rep.rejected == 1 and sink.sent == []
+    row = db.conn.execute("SELECT accepted, reject_reason FROM offer WHERE url = ?", (A1,)).fetchone()
+    assert row["accepted"] == 0 and "terceiros" in row["reject_reason"]
+    assert db.history_count("a") == 1  # a recusada não entra no histórico
+
+
+def test_um_coletor_quebrado_nao_derruba_os_outros(db):
+    cfg = make_config()
+    quebrado = FakeCollector("fake", {A1: FetchError("boom"), A2: ValueError("parse"), B1: good("b", B1, 250.0)})
+    outra = FakeCollector("outra", {OB: good("b", OB, 400.0)})
+    rep = runner.run_collection(cfg, db, {"fake": quebrado, "outra": outra}, Sink(), NOW)
+    assert rep.failed == 2 and rep.collected == 2
+    assert outra.calls == [OB] and quebrado.calls == [A1, A2, B1]
+
+
+def test_aviso_so_na_terceira_falha_seguida_e_so_uma_vez(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: FetchError("fora"), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    sink = Sink()
+    for i in range(2):
+        runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=i))
+    assert sink.sent == []
+    runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=2))
+    assert len(sink.sent) == 1 and "falhando" in sink.sent[0][0] and A1 in sink.sent[0][1]
+    runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=3))
+    assert len(sink.sent) == 1  # não repete o aviso
+
+
+def test_sucesso_zera_a_contagem_de_falhas(db):
+    cfg = make_config()
+    sink = Sink()
+    falha = FakeCollector("fake", {A1: FetchError("x"), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    for i in range(2):
+        runner.run_collection(cfg, db, {"fake": falha}, sink, NOW + timedelta(hours=i))
+    bom = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    runner.run_collection(cfg, db, {"fake": bom}, sink, NOW + timedelta(hours=2))
+    for i in range(3, 5):
+        runner.run_collection(cfg, db, {"fake": falha}, sink, NOW + timedelta(hours=i))
+    assert sink.sent == []  # recomeçou do zero: só 2 falhas seguidas
+
+
+def test_loja_que_bloqueia_o_ua_sai_do_coletor_e_avisa(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: Blocked("loja.test respondeu 403"), A2: good("a", A2, 1.0), B1: good("b", B1, 1.0)})
+    sink = Sink()
+    rep = runner.run_collection(cfg, db, {"fake": col}, sink, NOW)
+    assert rep.disabled == ["fake"] and col.calls == [A1]  # parou na hora, sem tentar as outras URLs
+    assert "Loja desativada" in sink.sent[0][0] and "enable fake" in sink.sent[0][1]
+    runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=6))
+    assert col.calls == [A1]  # desativada: nem tenta de novo
+    db.del_state("disabled:fake")  # `python -m precos enable fake`
+    runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=12))
+    assert col.calls == [A1, A1]
+
+
+def test_ntfy_fora_do_ar_nao_derruba_a_rodada_e_o_alerta_e_refeito(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: good("a", A1, 90.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    rep = runner.run_collection(cfg, db, {"fake": col}, Sink(fail=True), NOW)
+    assert rep.collected == 3 and rep.alerts == 0 and db.last_alert("a", "fake") is None
+    sink = Sink()
+    runner.run_collection(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=1))
+    assert len(sink.sent) == 1  # como não foi gravado, avisa na próxima
+
+
+def test_loja_sem_coletor_e_ignorada(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    rep = runner.run_collection(cfg, db, {"fake": col}, Sink(), NOW)  # "outra" sem coletor
+    assert rep.collected == 3
+
+
+def test_tick_coleta_e_manda_resumo_uma_vez(db):
+    cfg = make_config()
+    col = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    sink = Sink()
+    runner.tick(cfg, db, {"fake": col}, sink, NOW)  # 09:00 em Recife
+    assert [t for t, *_ in sink.sent] == ["Resumo diário de preços"]
+    n = len(col.calls)
+    runner.tick(cfg, db, {"fake": col}, sink, NOW + timedelta(minutes=1))
+    assert len(col.calls) == n and len(sink.sent) == 1  # nem coleta nem resume de novo
+    runner.tick(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=6))
+    assert len(col.calls) == 2 * n  # intervalo de 6 h vencido
+    assert len(sink.sent) == 1  # o resumo é diário

@@ -1,0 +1,98 @@
+# Metas e lojas do monitor. Edite à vontade: `python -m precos check-config` valida.
+# Termos de uso vencem robots.txt: só lojas cujos termos não proíbem coleta automatizada
+# (KaBuM, e o Mercado Livre pela API). Fast Shop, Magalu e Amazon ficam de fora de propósito.
+timezone: America/Recife
+user_agent: "mgdn-precos/0.1 (monitor pessoal de precos)"
+request_delay_seconds: 5
+
+schedule:
+  collect_every_hours: 6
+  burst:               # Black Friday: coleta de hora em hora (datas no fuso acima, inclusive)
+    from: 2026-11-20
+    to: 2026-12-01
+    every_hours: 1
+  summary_at: "09:00"
+
+alerts:
+  drop_pct: 8              # queda sobre a mediana dos últimos 14 dias
+  drop_window_days: 14
+  dedupe_hours: 24         # não repete produto+loja, salvo se o preço cair de novo
+  min_history: 3           # observações anteriores para valer "novo mínimo" e "queda"
+  installment_vs_pix_pct: 5  # parcelar se o sem juros custar até 5% a mais que o Pix
+
+first_party_sellers:       # "vendido e entregue pela própria loja"
+  kabum: ["kabum!", "kabum"]
+
+defaults:
+  forbidden: [usado, seminovo, recondicionado, "open box", importado, importada, "gift card", "pacote de melhoria"]
+
+products:
+  - id: console
+    name: Console Nintendo Switch 2 256 GB
+    category: console
+    required: ["switch 2", "console", "256"]
+    forbidden: [bundle, kit, jogo, "mario kart", pokemon, zelda, "fc 27", "sports resort", edicao, anniversary]
+    target: { pix: 3700, installment: 3800 }   # preço de rua, não o sugerido
+    stores:
+      kabum:
+        - https://www.kabum.com.br/produto/777177/console-nintendo-switch-2-256gb-preto-azul-e-vermelho
+
+  - id: pro-controller
+    name: Nintendo Switch 2 Pro Controller (oficial)
+    category: accessory
+    required: ["switch 2", "pro controller"]
+    forbidden: [resident, anniversary, "40th", feir, base, stand]
+    target: 500
+    stores: {}   # 10/11: os anúncios da KaBuM são todos de terceiros (marketplace); entra pelo Mercado Livre
+
+  - id: zelda-ocarina
+    name: "Zelda: Ocarina of Time (Switch 2), mídia física"
+    category: game
+    required: ["ocarina", "switch 2"]
+    target: 399
+    stores:
+      kabum:
+        - https://www.kabum.com.br/produto/1073448/jogo-the-legend-of-zelda-ocarina-of-time-nintendo-switch-2-edicao-capa-normal-standard
+        - https://www.kabum.com.br/produto/1073449/jogo-the-legend-of-zelda-ocarina-of-time-nintendo-switch-2-edicao-limitada-capa-foil-nsca10000080fgr
+
+  - id: zelda-botw
+    name: "Zelda: Breath of the Wild, Nintendo Switch 2 Edition, mídia física"
+    category: game
+    required: ["breath of the wild", "switch 2"]
+    target: 330
+    stores:
+      kabum:   # 10/11: vendido pela KaBuM, esgotado
+        - https://www.kabum.com.br/produto/779795/jogo-the-legend-of-zelda-breath-of-the-wild-nintendo-switch-2-edition
+
+  - id: zelda-totk
+    name: "Zelda: Tears of the Kingdom, Nintendo Switch 2 Edition, mídia física"
+    category: game
+    required: ["tears of the kingdom", "switch 2"]
+    target: 380
+    stores:
+      kabum:   # 10/11: vendido pela KaBuM, esgotado
+        - https://www.kabum.com.br/produto/779796/jogo-the-legend-of-zelda-tears-of-the-kingdom-nintendo-switch-2-edition
+
+  - id: pokemon-za
+    name: "Pokémon Legends: Z-A, Nintendo Switch 2 Edition, mídia física"
+    category: game
+    required: ["pokemon legends", "switch 2"]
+    target: 380
+    stores:
+      kabum:   # 10/11: vendido pela KaBuM, esgotado
+        - https://www.kabum.com.br/produto/910941/jogo-pokemon-legends-z-a-nintendo-switch-2-nt000056nsw
+
+  - id: split-fiction
+    name: "Split Fiction (Switch 2), mídia física"
+    category: game
+    required: ["split fiction", "switch 2"]
+    target: 250
+    stores: {}   # sem anúncio na KaBuM; entra com o Mercado Livre (API)
+
+  - id: capa-pelicula
+    name: Capa protetora + película para Switch 2
+    category: accessory
+    required: ["switch 2", "pelicula"]
+    forbidden: [switch 1, lite, oled]
+    target: 150
+    stores: {}   # 10/11: 6 kits testados na KaBuM, todos de terceiros; entra pelo Mercado Livre
