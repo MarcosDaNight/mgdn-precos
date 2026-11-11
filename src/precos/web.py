@@ -70,6 +70,9 @@ def render(cfg: Config, db: DB, now: datetime) -> str:
     for store in sorted({s for p in cfg.products for s in p.stores}):
         off = db.get_state(f"disabled:{store}")
         store_rows.append(f"<tr><td>{_e(store)}</td><td>{'<span class=w>desativada</span> — ' + _e(off) if off else 'ativa'}</td></tr>")
+    fails = "".join(
+        f"<tr><td>{_e(r['key'].split('|', 1)[-1][-70:])}</td><td>{r['consecutive']}×</td><td class='m'>{_e((r['last_error'] or '')[:140])}</td></tr>"
+        for r in db.failures())
     rej = "".join(
         f"<tr><td class='m'>{datetime.fromisoformat(r['ts']).astimezone(tz):%d/%m %H:%M}</td><td>{_e(r['store'])}</td>"
         f"<td>{_e((r['title'] or '')[:70])}</td><td class='m'>{_e(r['reject_reason'])}</td></tr>"
@@ -81,6 +84,7 @@ def render(cfg: Config, db: DB, now: datetime) -> str:
 <h1>Monitor de preços</h1><p class="m">Última coleta bem-sucedida: {last} · preços lidos das páginas, confira no checkout (frete e cupom ficam de fora)</p>
 <div class="t"><table><tr><th>Produto</th><th>Melhor preço</th><th>Loja</th><th>Meta</th><th>Mínimo</th><th>Situação</th><th>Lido em</th></tr>{''.join(rows)}</table></div>
 <h2>Lojas</h2><div class="t"><table>{''.join(store_rows) or '<tr><td class="m">nenhuma loja configurada</td></tr>'}</table></div>
+<h2>Falhas (URLs que não foram lidas)</h2><div class="t"><table>{fails or '<tr><td class="m">nenhuma falha</td></tr>'}</table></div>
 <h2>Recusadas nas últimas 48 h</h2><div class="t"><table>{rej or '<tr><td class="m">nada recusado</td></tr>'}</table></div>
 </body></html>"""
 

@@ -111,3 +111,16 @@ def test_banco_inexistente_da_503_e_nao_derruba_o_servidor(tmp_path):
         assert get(base + "/healthz")[0] == 503  # segue de pé
     finally:
         srv.shutdown()
+
+
+def test_painel_mostra_as_urls_que_falharam_e_o_erro(db):
+    cfg = make_config()
+    db.record_failure("kabum|https://www.kabum.com.br/produto/1/x", "ValueError: <b>bug</b>")
+    db.record_failure("kabum|https://www.kabum.com.br/produto/1/x", "ValueError: <b>bug</b>")
+    page = web.render(cfg, db, NOW)
+    assert "Falhas (URLs que não foram lidas)" in page and "produto/1/x" in page and "2×" in page
+    assert "&lt;b&gt;bug&lt;/b&gt;" in page and "<b>bug</b>" not in page
+
+
+def test_painel_sem_falhas_diz_nenhuma(db):
+    assert "nenhuma falha" in web.render(make_config(), db, NOW)
