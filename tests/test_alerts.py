@@ -106,7 +106,7 @@ def test_mensagem_traz_o_que_foi_pedido(real_config, db):
     a = ev(real_config, db, "console", price_pix=3650.0, installments=10, installment_amount=400.0, interest_free=True)
     title, msg, prio = alerts.format_alert(a)
     assert title == "COMPRAR · Console Nintendo Switch 2 256 GB" and prio == 4
-    for piece in ("Pix: R$ 3.650,00", "10x R$ 400,00 = R$ 4.000,00 sem juros", "Loja: fake",
+    for piece in ("Pix/à vista: R$ 3.650,00", "10x R$ 400,00 = R$ 4.000,00 sem juros", "Loja: fake",
                   "Meta: Pix R$ 3.700,00 / parcelado R$ 3.800,00", "Mínimo histórico: R$ 3.650,00",
                   "meta atingida", "novo mínimo histórico", "Veredito: COMPRAR", "Recomendação: pagar no Pix"):
         assert piece in msg, piece

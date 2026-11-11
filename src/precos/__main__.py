@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from . import config as config_mod
 from .collectors.http import PoliteClient
 from .collectors.kabum import KabumCollector
+from .collectors.mercadolivre import MercadoLivreCollector, MLAuth
 from .db import DB
 from .heartbeat import make_heartbeat
 from .notify import ConsoleNotifier, NtfyNotifier
@@ -17,9 +18,21 @@ from .runner import run_collection, tick
 from .summary import build_summary
 
 
-def _collectors(cfg):
+def _ml_auth(db):
+    cid, secret = os.environ.get("ML_CLIENT_ID"), os.environ.get("ML_CLIENT_SECRET")
+    if not (cid and secret):
+        return None
+    return MLAuth(db, cid, secret, os.environ.get("ML_REDIRECT_URI", "https://precos.mgdn.com.br/ml/callback"))
+
+
+def _collectors(cfg, db):
     http = PoliteClient(cfg.user_agent, cfg.request_delay_seconds)
-    return {"kabum": KabumCollector(http, cfg.first_party_sellers.get("kabum", ("kabum!", "kabum")))}
+    collectors = {"kabum": KabumCollector(http, cfg.first_party_sellers.get("kabum", ("kabum!", "kabum")))}
+    if auth := _ml_auth(db):
+        collectors["mercadolivre"] = MercadoLivreCollector(auth, cfg.user_agent)
+    else:
+        logging.warning("ML_CLIENT_ID/ML_CLIENT_SECRET não definidas: Mercado Livre desligado")
+    return collectors
 
 
 def _notifier(dry_run: bool):
@@ -29,6 +42,27 @@ def _notifier(dry_run: bool):
             logging.warning("NTFY_URL não definida: usando o modo de teste (só imprime)")
         return ConsoleNotifier()
     return NtfyNotifier(url)
+
+
+def _ml_command(args, cfg, db) -> int:
+    auth = _ml_auth(db)
+    if auth is None:
+        print("defina ML_CLIENT_ID e ML_CLIENT_SECRET (o secret vai por segredo cifrado, nunca no chat)", file=sys.stderr)
+        return 2
+    if args.cmd == "ml-auth-url":
+        print(auth.authorize_url())
+        return 0
+    if args.cmd == "ml-auth":
+        auth.exchange_code(args.code)
+        print("tokens gravados no banco")
+        return 0
+    from . import filters
+    product = next((p for p in cfg.products if args.url in p.stores.get("mercadolivre", ())), cfg.products[0])
+    offer = MercadoLivreCollector(auth, cfg.user_agent).fetch(product, args.url)
+    verdict = filters.evaluate(product, offer, cfg.default_forbidden)
+    print(offer)
+    print(f"produto avaliado: {product.id} | filtros: {'ACEITA' if verdict.ok else 'RECUSA: ' + str(verdict.reason)}")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -41,6 +75,11 @@ def main(argv=None) -> int:
     sub.add_parser("once", help="uma rodada de coleta agora")
     sub.add_parser("summary", help="imprime/envia o resumo diário agora")
     sub.add_parser("check-config", help="valida o config.yaml")
+    sub.add_parser("ml-auth-url", help="URL para autorizar o app no Mercado Livre (abra no navegador)")
+    ma = sub.add_parser("ml-auth", help="troca o `code` da URL de retorno pelos tokens")
+    ma.add_argument("code")
+    mc = sub.add_parser("ml-check", help="lê UM anúncio pela API e mostra o que os filtros decidem")
+    mc.add_argument("url")
     en = sub.add_parser("enable", help="reativa uma loja desativada por bloqueio")
     en.add_argument("store")
     args = ap.parse_args(argv)
@@ -62,15 +101,17 @@ def main(argv=None) -> int:
         db.del_state(f"disabled:{args.store}")
         print(f"{args.store} reativada")
         return 0
+    if args.cmd in ("ml-auth-url", "ml-auth", "ml-check"):
+        return _ml_command(args, cfg, db)
     notifier = _notifier(args.dry_run)
     now = datetime.now(timezone.utc)
     if args.cmd == "summary":
         title, msg = build_summary(cfg, db, now)
         notifier.send(title, msg)
     elif args.cmd == "once":
-        print(run_collection(cfg, db, _collectors(cfg), notifier, now))
+        print(run_collection(cfg, db, _collectors(cfg, db), notifier, now))
     else:
-        collectors = _collectors(cfg)
+        collectors = _collectors(cfg, db)
         hc = os.environ.get("HEALTHCHECK_URL")
         heartbeat = make_heartbeat(hc) if hc else None
         logging.info("iniciado: %d produtos (heartbeat %s)", len(cfg.products), "ligado" if heartbeat else "desligado")

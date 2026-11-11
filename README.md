@@ -30,6 +30,22 @@ loja, meta, mínimo histórico e o veredito (`COMPRAR`/`ESPERAR`). Se o parcelad
 a mais que o Pix, recomenda parcelar; senão, Pix. Resumo diário às 09:00 (America/Recife). Coleta a cada
 6 h, e de hora em hora entre 20/11 e 01/12.
 
+## Mercado Livre (API oficial)
+
+Precisa de uma conta no Mercado Livre e de um app em developers.mercadolivre.com.br (escopos `read` e
+`offline_access`, Redirect URI HTTPS idêntico ao `ML_REDIRECT_URI`). Autorização, uma única vez:
+
+```bash
+python -m precos ml-auth-url          # abra a URL no navegador e autorize
+python -m precos ml-auth <code>       # `code=` que aparece na URL de retorno (a página pode dar 404: não importa)
+python -m precos ml-check <url-do-anuncio>   # lê UM anúncio e mostra o que os filtros decidem
+```
+
+O refresh token rotaciona a cada renovação e fica no banco. Só entra **Loja Oficial** (`official_store_id`).
+Limites: o ML não separa Pix (o preço da API é o valor à vista) e não informa parcelamento; a meta
+`installment` vale só para lojas que informam parcelas. **Escrito contra a documentação, sem token para
+testar contra a API real: valide com `ml-check` na primeira vez.**
+
 ## Confiabilidade
 
 - **Preço absurdo não vira alerta de primeira:** uma leitura abaixo de 50% da mediana recente (com pelo menos
@@ -53,6 +69,8 @@ NTFY_URL=https://ntfy.sh/<topico-secreto> .venv/bin/python -m precos run   # la�
 |---|---|
 | `NTFY_URL` | URL **completa** do tópico secreto (vem de um segredo cifrado, nunca do repositório) |
 | `HEALTHCHECK_URL` | URL de ping do Healthchecks (opcional): o coletor avisa a cada rodada que coletou. Crie o check com período de 1 dia e tolerância de 4 h; se o coletor ficar mudo, o próprio Healthchecks alerta |
+| `ML_CLIENT_ID`, `ML_CLIENT_SECRET` | credenciais do app do Mercado Livre (o secret vem de segredo cifrado, nunca do repositório) |
+| `ML_REDIRECT_URI` | padrão `https://precos.mgdn.com.br/ml/callback` (igual ao cadastrado no app) |
 | `PRECOS_CONFIG` | caminho do `config.yaml` (padrão: `config.yaml`) |
 | `PRECOS_DB` | arquivo SQLite (padrão: `data/precos.sqlite`) |
 
@@ -62,7 +80,7 @@ não o sugerido.
 ## Estado
 
 - [x] Núcleo, filtros, alertas, resumo, agenda e coletor da **KaBuM**
-- [ ] Mercado Livre (API oficial, falta o token)
+- [x] Mercado Livre (API oficial, testado só com respostas simuladas: falta o token para validar)
 - [ ] Pichau (depende dos termos de uso)
 - [ ] Imagem, CI e deploy na plataforma
 - [ ] Depois da Black Friday: gráficos e métricas

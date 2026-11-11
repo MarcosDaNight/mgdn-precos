@@ -26,6 +26,8 @@ first_party_sellers:       # "vendido e entregue pela própria loja"
 defaults:
   forbidden: [usado, seminovo, recondicionado, "open box", importado, importada, "gift card", "pacote de melhoria"]
 
+# Mercado Livre (API oficial, só Lojas Oficiais): cole o link do anúncio (MLB...) em `stores.mercadolivre`
+# e valide com `python -m precos ml-check <url>` antes de deixar coletando.
 products:
   - id: console
     name: Console Nintendo Switch 2 256 GB

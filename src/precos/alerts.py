@@ -136,7 +136,7 @@ def format_alert(a: Alert) -> tuple[str, str, int]:
     )
     lines = [
         a.product.name,
-        f"Pix: {brl(o.price_pix)}",
+        f"Pix/à vista: {brl(o.price_pix)}",
         f"Parcelado: {parcel}",
         f"Loja: {o.store}",
         f"Meta: {target_text(a.product)}",
