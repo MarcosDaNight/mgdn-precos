@@ -16,6 +16,7 @@ from .summary import build_summary
 log = logging.getLogger(__name__)
 FAILURES_BEFORE_WARNING = 3
 ATTEMPT_COOLDOWN = timedelta(minutes=10)  # rodada que aborta é refeita, sem martelar as lojas
+MAX_BACKOFF = timedelta(hours=3)  # teto do recuo quando NENHUMA página é lida
 
 
 @dataclass
@@ -97,6 +98,15 @@ def run_collection(cfg: Config, db: DB, collectors: dict[str, Collector], notifi
     return rep
 
 
+def reset_stale_state(db: DB) -> None:
+    """Ao subir o serviço. A versão anterior gravava `last_collect` no INÍCIO da rodada: se nunca houve uma
+    coleta bem-sucedida (`last_ok`), esse valor é de uma rodada que não terminou e não pode adiar a próxima."""
+    db.del_state("last_attempt")
+    if db.get_state("last_ok") is None:
+        db.del_state("last_collect")
+        db.del_state("empty_rounds")
+
+
 def tick(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifier, now: datetime | None = None,
          heartbeat: Callable[[], None] | None = None) -> Report | None:
     """Chamado a cada minuto pelo laço: coleta e/ou manda o resumo, se for a hora."""
@@ -104,13 +114,21 @@ def tick(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifi
     report = None
     last_collect = db.get_state("last_collect")  # só é gravado quando a rodada TERMINA
     last_attempt = db.get_state("last_attempt")
-    cooling = last_attempt is not None and now - datetime.fromisoformat(last_attempt) < ATTEMPT_COOLDOWN
+    # Rodadas seguidas em que NENHUMA página foi lida: recua (10, 20, 40... min, no máximo 3 h) em vez de
+    # martelar uma loja que está fora do ar ou nos bloqueando de forma silenciosa.
+    empty = int(db.get_state("empty_rounds") or 0)
+    cooldown = min(ATTEMPT_COOLDOWN * 2**empty, MAX_BACKOFF)
+    cooling = last_attempt is not None and now - datetime.fromisoformat(last_attempt) < cooldown
     if not cooling and schedule.collect_due(now, datetime.fromisoformat(last_collect) if last_collect else None, cfg):
         db.set_state("last_attempt", now.isoformat())
         report = run_collection(cfg, db, collectors, notifier, now)
-        # Se a rodada abortar (ou o serviço reiniciar no meio), last_collect não avança e ela é refeita
-        # depois do intervalo mínimo, em vez de o app achar que coletou e ficar 6 h sem tentar.
-        db.set_state("last_collect", now.isoformat())
+        if report.collected > 0:
+            # Só uma rodada que leu alguma página conta como feita. Se abortar, ou se tudo falhar, ela é refeita
+            # (com recuo) em vez de o app achar que coletou e ficar 6 h sem tentar.
+            db.set_state("last_collect", now.isoformat())
+            db.del_state("empty_rounds")
+        else:
+            db.set_state("empty_rounds", str(empty + 1))
         log.info("rodada: %s", report)
         if report.collected > 0:
             db.set_state("last_ok", now.isoformat())  # o /healthz mede por aqui, não pela tentativa
