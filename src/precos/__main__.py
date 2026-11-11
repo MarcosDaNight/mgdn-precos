@@ -58,12 +58,10 @@ def _ml_command(args, cfg, db) -> int:
         auth.exchange_code(args.code)
         print("tokens gravados no banco")
         return 0
-    from . import filters
-    product = next((p for p in cfg.products if args.url in p.stores.get("mercadolivre", ())), cfg.products[0])
-    offer = MercadoLivreCollector(auth, cfg.user_agent).fetch(product, args.url)
-    verdict = filters.evaluate(product, offer, cfg.default_forbidden)
-    print(offer)
-    print(f"produto avaliado: {product.id} | filtros: {'ACEITA' if verdict.ok else 'RECUSA: ' + str(verdict.reason)}")
+    from . import report
+    offer = MercadoLivreCollector(auth, cfg.user_agent).fetch(cfg.products[0], args.url)  # o produto só rotula a oferta
+    print(report.format_offer(offer))
+    print("\n".join(report.verdict_lines(offer, cfg, only=args.product)))
     return 0
 
 
@@ -82,6 +80,7 @@ def main(argv=None) -> int:
     ma.add_argument("code")
     mc = sub.add_parser("ml-check", help="lê UM anúncio pela API e mostra o que os filtros decidem")
     mc.add_argument("url")
+    mc.add_argument("--product", help="avalia só contra este produto (padrão: todos)")
     en = sub.add_parser("enable", help="reativa uma loja desativada por bloqueio")
     en.add_argument("store")
     args = ap.parse_args(argv)
