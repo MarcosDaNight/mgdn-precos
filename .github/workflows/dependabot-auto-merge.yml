@@ -1,0 +1,48 @@
+name: dependabot-auto-merge
+
+# Auto-merge do Dependabot, mesma política da mgdn-platform (ADR 0011):
+# PATCH de tudo e MINOR de imagens de container. O merge nativo do GitHub só acontece
+# depois dos checks obrigatórios da main (`test`: testes e config; `image`: build
+# da imagem, Trivy e smoke test). Major, e minor de npm/Actions, ficam para revisão manual.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - id: policy
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: |
+          if [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]] ||
+             [[ "$UPDATE_TYPE" == "version-update:semver-minor" && "$ECOSYSTEM" == docker* ]]; then
+            echo "auto=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "auto=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Habilitar auto-merge
+        if: steps.policy.outputs.auto == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+        run: |
+          gh pr merge --auto --squash "$PR_URL"
+          gh pr comment "$PR_URL" --body "🤖 ${UPDATE_TYPE#version-update:semver-}: auto-merge habilitado (entra quando todos os checks passarem)."
+
+      - name: Revisão manual
+        if: steps.policy.outputs.auto != 'true'
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: echo "::notice::$UPDATE_TYPE ($ECOSYSTEM) — mantido para revisão manual."

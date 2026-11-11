@@ -1,0 +1,9 @@
+# Config do smoke test do CI: produtos, mas NENHUMA loja (o CI não deve fazer requisições às lojas).
+timezone: America/Recife
+products:
+  - id: console
+    name: Console de teste
+    category: console
+    required: ["switch 2"]
+    target: 1000
+    stores: {}

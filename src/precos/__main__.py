@@ -13,13 +13,15 @@ from .collectors.kabum import KabumCollector
 from .collectors.mercadolivre import MercadoLivreCollector, MLAuth
 from .db import DB
 from .heartbeat import make_heartbeat
+from .secrets import env_or_file
+from .web import serve
 from .notify import ConsoleNotifier, NtfyNotifier
 from .runner import run_collection, tick
 from .summary import build_summary
 
 
 def _ml_auth(db):
-    cid, secret = os.environ.get("ML_CLIENT_ID"), os.environ.get("ML_CLIENT_SECRET")
+    cid, secret = env_or_file("ML_CLIENT_ID"), env_or_file("ML_CLIENT_SECRET")
     if not (cid and secret):
         return None
     return MLAuth(db, cid, secret, os.environ.get("ML_REDIRECT_URI", "https://precos.mgdn.com.br/ml/callback"))
@@ -36,7 +38,7 @@ def _collectors(cfg, db):
 
 
 def _notifier(dry_run: bool):
-    url = os.environ.get("NTFY_URL")
+    url = env_or_file("NTFY_URL")
     if dry_run or not url:
         if not dry_run:
             logging.warning("NTFY_URL não definida: usando o modo de teste (só imprime)")
@@ -112,7 +114,10 @@ def main(argv=None) -> int:
         print(run_collection(cfg, db, _collectors(cfg, db), notifier, now))
     else:
         collectors = _collectors(cfg, db)
-        hc = os.environ.get("HEALTHCHECK_URL")
+        hc = env_or_file("HEALTHCHECK_URL")
+        port = int(os.environ.get("PORT", "8080"))
+        serve(cfg, args.db, port)
+        logging.info("painel em :%d (/ e /healthz)", port)
         heartbeat = make_heartbeat(hc) if hc else None
         logging.info("iniciado: %d produtos (heartbeat %s)", len(cfg.products), "ligado" if heartbeat else "desligado")
         while True:

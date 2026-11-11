@@ -99,6 +99,8 @@ def tick(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifi
         db.set_state("last_collect", now.isoformat())  # marca antes: uma rodada lenta não dispara outra
         report = run_collection(cfg, db, collectors, notifier, now)
         log.info("rodada: %s", report)
+        if report.collected > 0:
+            db.set_state("last_ok", now.isoformat())  # o /healthz mede por aqui, não pela tentativa
         # "Estou vivo": só depois de coletar de verdade ao menos uma página. Se tudo falhar, o silêncio avisa.
         if heartbeat and report.collected > 0:
             try:
