@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12-alpine AS build
+FROM python:3.15-alpine AS build
 WORKDIR /src
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir --prefix=/install .
 
-FROM python:3.12-alpine
+FROM python:3.15-alpine
 ENV PYTHONUNBUFFERED=1 PRECOS_DB=/data/precos.sqlite PRECOS_CONFIG=/app/config.yaml PORT=8080
 WORKDIR /app
 COPY --from=build /install /usr/local
