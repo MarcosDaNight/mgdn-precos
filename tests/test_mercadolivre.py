@@ -192,6 +192,14 @@ def test_403_diz_para_conferir_token_escopo_e_termos(db):
         col.fetch(product(), "https://produto.mercadolivre.com.br/MLB-3456789012-x")
 
 
+def test_403_mostra_o_motivo_dado_pela_api(db):
+    body = {"message": "At least one policy returned UNAUTHORIZED.", "error": "forbidden", "blocked_by": "PolicyAgent", "code": "PA_UNAUTHORIZED_RESULT_FROM_POLICIES"}
+    col = collector(db, {"/items/MLB3456789012": httpx.Response(403, json=body)})
+    with pytest.raises(FetchError, match="blocked_by=PolicyAgent") as e:
+        col.fetch(product(), "https://produto.mercadolivre.com.br/MLB-3456789012-x")
+    assert "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" in str(e.value)
+
+
 def test_404_e_erro_sem_retry(db):
     calls = []
     col = collector(db, {"/items/MLB3456789012": httpx.Response(404)}, calls)

@@ -8,9 +8,9 @@ import time
 from datetime import datetime, timezone
 
 from . import config as config_mod
-from .collectors.http import PoliteClient
+from .collectors.http import FetchError, PoliteClient
 from .collectors.kabum import KabumCollector
-from .collectors.mercadolivre import MercadoLivreCollector, MLAuth
+from .collectors.mercadolivre import MercadoLivreCollector, MLAuth, ParseError
 from .db import DB
 from .heartbeat import make_heartbeat
 from .secrets import env_or_file
@@ -59,7 +59,11 @@ def _ml_command(args, cfg, db) -> int:
         print("tokens gravados no banco")
         return 0
     from . import report
-    offer = MercadoLivreCollector(auth, cfg.user_agent).fetch(cfg.products[0], args.url)  # o produto só rotula a oferta
+    try:
+        offer = MercadoLivreCollector(auth, cfg.user_agent).fetch(cfg.products[0], args.url)  # o produto só rotula a oferta
+    except (FetchError, ParseError) as e:
+        print(f"ERRO: {e}")
+        return 1
     print(report.format_offer(offer))
     print("\n".join(report.verdict_lines(offer, cfg, only=args.product)))
     return 0

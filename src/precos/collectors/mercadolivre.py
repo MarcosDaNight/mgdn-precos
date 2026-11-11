@@ -26,6 +26,18 @@ _PRODUCT_ID = re.compile(r"/p/(MLB\d+)")
 _COND = {"new": "new", "used": "used"}
 
 
+def _brief(r: httpx.Response) -> str:
+    """Corpo do erro da API (só mensagem/código, sem tokens): é o que diz POR QUE o acesso foi negado."""
+    try:
+        b = r.json()
+        parts = [f"{k}={b[k]}" for k in ("error", "message", "blocked_by", "code") if isinstance(b, dict) and b.get(k)]
+        if parts:
+            return "; ".join(parts)[:300]
+    except ValueError:
+        pass
+    return (r.text or "(vazia)")[:200]
+
+
 class MLAuthError(FetchError):
     pass
 
@@ -139,13 +151,14 @@ class MercadoLivreCollector:
                     continue
                 raise FetchError(f"Mercado Livre limitou as chamadas (429) em {path}")
             if r.status_code == 403:
-                raise FetchError(f"Mercado Livre negou acesso (403) a {path}: confira o token, os escopos e os Termos do Programa de Desenvolvedores")
+                raise FetchError(f"Mercado Livre negou acesso (403) a {path}: confira o token, os escopos e os Termos do Programa de Desenvolvedores. "
+                                 f"Resposta: {_brief(r)}")
             if r.status_code == 404:
                 raise FetchError(f"não encontrado no Mercado Livre: {path}")
             if r.status_code >= 500:
                 self.sleep(2**attempt)
                 continue
-            raise FetchError(f"Mercado Livre respondeu {r.status_code} em {path}")
+            raise FetchError(f"Mercado Livre respondeu {r.status_code} em {path}. Resposta: {_brief(r)}")
         raise FetchError(f"falhou 3 vezes em {path}")
 
     def fetch(self, product: Product, url: str) -> Offer:
