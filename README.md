@@ -30,6 +30,15 @@ loja, meta, mínimo histórico e o veredito (`COMPRAR`/`ESPERAR`). Se o parcelad
 a mais que o Pix, recomenda parcelar; senão, Pix. Resumo diário às 09:00 (America/Recife). Coleta a cada
 6 h, e de hora em hora entre 20/11 e 01/12.
 
+## Confiabilidade
+
+- **Preço absurdo não vira alerta de primeira:** uma leitura abaixo de 50% da mediana recente (com pelo menos
+  3 leituras de histórico) é gravada como `preço suspeito` e só vale se a **próxima leitura** da mesma URL
+  chegar a até 3% dela. Isso evita um falso "COMPRAR" por erro de parser e não contamina o mínimo histórico.
+- **Silêncio avisa:** o heartbeat só sai depois de coletar de verdade pelo menos uma página.
+- Falha de uma URL não derruba as outras; 3 falhas seguidas avisam no ntfy; loja que bloqueia o UA é desativada.
+- Limites honestos: o preço da página pode diferir do final (frete, cupom, estoque na hora de pagar).
+
 ## Uso
 
 ```bash
@@ -43,6 +52,7 @@ NTFY_URL=https://ntfy.sh/<topico-secreto> .venv/bin/python -m precos run   # la�
 | Variável | Para quê |
 |---|---|
 | `NTFY_URL` | URL **completa** do tópico secreto (vem de um segredo cifrado, nunca do repositório) |
+| `HEALTHCHECK_URL` | URL de ping do Healthchecks (opcional): o coletor avisa a cada rodada que coletou. Crie o check com período de 1 dia e tolerância de 4 h; se o coletor ficar mudo, o próprio Healthchecks alerta |
 | `PRECOS_CONFIG` | caminho do `config.yaml` (padrão: `config.yaml`) |
 | `PRECOS_DB` | arquivo SQLite (padrão: `data/precos.sqlite`) |
 

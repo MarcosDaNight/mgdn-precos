@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -71,6 +72,9 @@ def run_collection(cfg: Config, db: DB, collectors: dict[str, Collector], notifi
                 db.clear_failure(key)
                 rep.collected += 1
                 verdict = filters.evaluate(product, offer, cfg.default_forbidden)
+                if verdict.ok and alerts.is_suspect(product, offer, db, now, cfg.alerts) and not alerts.confirmed(db, offer, filters.SUSPECT):
+                    verdict = filters.Verdict(False, f"{filters.SUSPECT} ({alerts.brl(offer.best_price)}, muito abaixo da mediana recente)")
+                    log.warning("%s em %s: espero a próxima leitura para confirmar", verdict.reason, offer.url)
                 alert = alerts.evaluate(product, offer, db, now, cfg.alerts) if verdict.ok else None
                 db.insert_offer(offer, verdict.ok, verdict.reason)
                 if not verdict.ok:
@@ -85,7 +89,8 @@ def run_collection(cfg: Config, db: DB, collectors: dict[str, Collector], notifi
     return rep
 
 
-def tick(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifier, now: datetime | None = None) -> Report | None:
+def tick(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifier, now: datetime | None = None,
+         heartbeat: Callable[[], None] | None = None) -> Report | None:
     """Chamado a cada minuto pelo laço: coleta e/ou manda o resumo, se for a hora."""
     now = now or datetime.now(timezone.utc)
     report = None
@@ -94,6 +99,12 @@ def tick(cfg: Config, db: DB, collectors: dict[str, Collector], notifier: Notifi
         db.set_state("last_collect", now.isoformat())  # marca antes: uma rodada lenta não dispara outra
         report = run_collection(cfg, db, collectors, notifier, now)
         log.info("rodada: %s", report)
+        # "Estou vivo": só depois de coletar de verdade ao menos uma página. Se tudo falhar, o silêncio avisa.
+        if heartbeat and report.collected > 0:
+            try:
+                heartbeat()
+            except Exception:
+                log.exception("heartbeat falhou (a coleta segue)")
     last_summary = db.get_state("last_summary")
     if schedule.summary_due(now, datetime.fromisoformat(last_summary) if last_summary else None, cfg):
         title, message = build_summary(cfg, db, now)

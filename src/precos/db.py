@@ -48,6 +48,11 @@ class DB:
         )
         self.conn.commit()
 
+    def last_offer_for_url(self, url: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM offer WHERE url = ? ORDER BY ts DESC, id DESC LIMIT 1", (url,)
+        ).fetchone()
+
     def history_count(self, product_id: str) -> int:
         return self.conn.execute(f"SELECT COUNT(*) FROM offer WHERE {_HIST}", (product_id,)).fetchone()[0]
 

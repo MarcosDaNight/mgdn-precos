@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .config import Product
 from .models import Offer
 
+SUSPECT = "preço suspeito"  # leitura muito abaixo do normal: só vale depois de confirmada
 GAME_KEY = ("game-key", "game key", "gamekey")
 USED = ("usado", "seminovo", "recondicionado", "open box", "openbox", "vitrine")
 DIGITAL = ("digital", "codigo", "download", "gift card", "pacote de melhoria")

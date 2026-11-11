@@ -27,6 +27,29 @@ class Alert:
     payment_advice: str
 
 
+SUSPECT_RATIO = 0.5  # abaixo de 50% da mediana recente, desconfia de erro de leitura
+CONFIRM_TOLERANCE = 0.03  # a 2ª leitura confirma se ficar a até 3% da 1ª
+
+
+def is_suspect(product: Product, offer: Offer, db: DB, now: datetime, rules: AlertRules) -> bool:
+    """Preço muito abaixo da mediana: pode ser promoção real ou erro do parser (R$ 4,99 em vez de R$ 499).
+    Só vale depois de uma segunda leitura parecida. Precisa de histórico; sem ele, a guarda não atua."""
+    best = offer.best_price
+    if best is None:
+        return False
+    median = db.median_since(product.id, now - timedelta(days=rules.drop_window_days), rules.min_history)
+    return median is not None and best < median * SUSPECT_RATIO
+
+
+def confirmed(db: DB, offer: Offer, suspect_prefix: str) -> bool:
+    """A leitura anterior desta mesma URL foi recusada como suspeita e esta chegou a até 3% dela?"""
+    prev = db.last_offer_for_url(offer.url)
+    best = offer.best_price
+    if prev is None or best is None or not (prev["reject_reason"] or "").startswith(suspect_prefix):
+        return False
+    return prev["best_price"] is not None and abs(best - prev["best_price"]) <= prev["best_price"] * CONFIRM_TOLERANCE
+
+
 def meets_target(product: Product, offer: Offer) -> bool:
     t = product.targets
     if t.pix is not None and offer.price_pix is not None and offer.price_pix <= t.pix:

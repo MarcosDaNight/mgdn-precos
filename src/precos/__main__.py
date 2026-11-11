@@ -11,6 +11,7 @@ from . import config as config_mod
 from .collectors.http import PoliteClient
 from .collectors.kabum import KabumCollector
 from .db import DB
+from .heartbeat import make_heartbeat
 from .notify import ConsoleNotifier, NtfyNotifier
 from .runner import run_collection, tick
 from .summary import build_summary
@@ -70,10 +71,12 @@ def main(argv=None) -> int:
         print(run_collection(cfg, db, _collectors(cfg), notifier, now))
     else:
         collectors = _collectors(cfg)
-        logging.info("iniciado: %d produtos", len(cfg.products))
+        hc = os.environ.get("HEALTHCHECK_URL")
+        heartbeat = make_heartbeat(hc) if hc else None
+        logging.info("iniciado: %d produtos (heartbeat %s)", len(cfg.products), "ligado" if heartbeat else "desligado")
         while True:
             try:
-                tick(cfg, db, collectors, notifier)
+                tick(cfg, db, collectors, notifier, heartbeat=heartbeat)
             except Exception:
                 logging.exception("erro na rodada (o laço continua)")
             time.sleep(60)

@@ -139,3 +139,70 @@ def test_tick_coleta_e_manda_resumo_uma_vez(db):
     runner.tick(cfg, db, {"fake": col}, sink, NOW + timedelta(hours=6))
     assert len(col.calls) == 2 * n  # intervalo de 6 h vencido
     assert len(sink.sent) == 1  # o resumo é diário
+
+
+# --- guarda contra preço absurdo e heartbeat ---------------------------------------------------
+from conftest import seed_history  # noqa: E402
+
+
+def _cheap(price):
+    return FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, price)})
+
+
+def test_preco_muito_abaixo_da_mediana_espera_confirmacao_antes_de_alertar(db):
+    cfg = make_config()
+    seed_history(db, "b", [440.0, 440.0, 440.0, 440.0])
+    sink = Sink()
+    runner.run_collection(cfg, db, {"fake": _cheap(100.0)}, sink, NOW)  # parece erro de leitura
+    assert sink.sent == []
+    row = db.last_offer_for_url(B1)
+    assert row["accepted"] == 0 and row["reject_reason"].startswith("preço suspeito")
+    assert db.history_min("b") == 440.0  # o suspeito NÃO contamina o mínimo histórico
+    runner.run_collection(cfg, db, {"fake": _cheap(101.0)}, sink, NOW + timedelta(hours=6))  # confirmou (±3%)
+    assert len(sink.sent) == 1 and sink.sent[0][0].startswith("COMPRAR · Produto B")
+    assert db.history_min("b") == 101.0
+
+
+def test_segunda_leitura_diferente_nao_confirma(db):
+    cfg = make_config()
+    seed_history(db, "b", [440.0, 440.0, 440.0, 440.0])
+    sink = Sink()
+    runner.run_collection(cfg, db, {"fake": _cheap(100.0)}, sink, NOW)
+    runner.run_collection(cfg, db, {"fake": _cheap(150.0)}, sink, NOW + timedelta(hours=6))  # ainda suspeito, longe de 100
+    assert sink.sent == [] and db.history_min("b") == 440.0
+
+
+def test_sem_historico_a_guarda_nao_atua(db):
+    cfg = make_config()
+    sink = Sink()
+    runner.run_collection(cfg, db, {"fake": _cheap(100.0)}, sink, NOW)
+    assert len(sink.sent) == 1  # sem mediana não dá para desconfiar; vale a meta
+
+
+def test_queda_normal_nao_e_suspeita(db):
+    cfg = make_config()
+    seed_history(db, "b", [440.0, 440.0, 440.0, 440.0])
+    sink = Sink()
+    runner.run_collection(cfg, db, {"fake": _cheap(290.0)}, sink, NOW)  # -34%: promoção, não erro
+    assert len(sink.sent) == 1
+
+
+def test_heartbeat_so_depois_de_coletar_de_verdade(db):
+    cfg = make_config()
+    beats = []
+    ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    runner.tick(cfg, db, {"fake": ok}, Sink(), NOW, heartbeat=lambda: beats.append(1))
+    assert beats == [1]
+    tudo_falha = FakeCollector("fake", {u: FetchError("fora") for u in (A1, A2, B1)})
+    runner.tick(cfg, db, {"fake": tudo_falha}, Sink(), NOW + timedelta(hours=6), heartbeat=lambda: beats.append(1))
+    assert beats == [1]  # nada coletado: silêncio, e o Healthchecks é quem avisa
+
+
+def test_heartbeat_com_erro_nao_derruba_a_rodada(db):
+    cfg = make_config()
+    ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+
+    def boom():
+        raise RuntimeError("healthchecks fora")
+    rep = runner.tick(cfg, db, {"fake": ok}, Sink(), NOW, heartbeat=boom)
+    assert rep.collected == 3
