@@ -307,3 +307,51 @@ def test_reiniciar_o_servico_limpa_o_intervalo_minimo(db):
     ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
     runner.tick(cfg, db, {"fake": ok}, Sink(), NOW)
     assert ok.calls
+
+
+# --- estado legado da VM e rodada em que tudo falha ---------------------------------------------------
+def test_estado_legado_da_vm_nao_adia_a_primeira_coleta(db):
+    """O 1º deploy gravou last_collect no INÍCIO de uma rodada que abortou: sem last_ok, isso não vale."""
+    db.set_state("last_collect", NOW.isoformat())
+    db.set_state("last_attempt", NOW.isoformat())
+    runner.reset_stale_state(db)
+    ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    rep = runner.tick(make_config(), db, {"fake": ok}, Sink(), NOW + timedelta(minutes=20))
+    assert rep is not None and rep.collected == 3 and db.get_state("last_ok") is not None
+
+
+def test_estado_legado_so_e_limpo_se_nunca_houve_coleta_boa(db):
+    db.set_state("last_ok", NOW.isoformat())
+    db.set_state("last_collect", NOW.isoformat())
+    runner.reset_stale_state(db)
+    assert db.get_state("last_collect") == NOW.isoformat()  # havia coleta boa: o intervalo normal vale
+
+
+def test_rodada_em_que_tudo_falha_nao_conta_como_feita_e_recua(db):
+    cfg = make_config()
+    fora = FakeCollector("fake", {u: FetchError("fora do ar") for u in (A1, A2, B1)})
+    runner.tick(cfg, db, {"fake": fora}, Sink(), NOW)
+    assert db.get_state("last_collect") is None and db.get_state("empty_rounds") == "1"
+    n = len(fora.calls)
+    runner.tick(cfg, db, {"fake": fora}, Sink(), NOW + timedelta(minutes=15))  # recuo de 20 min
+    assert len(fora.calls) == n
+    runner.tick(cfg, db, {"fake": fora}, Sink(), NOW + timedelta(minutes=21))
+    assert len(fora.calls) == 2 * n and db.get_state("empty_rounds") == "2"
+    runner.tick(cfg, db, {"fake": fora}, Sink(), NOW + timedelta(minutes=21 + 39))  # agora o recuo é de 40 min
+    assert len(fora.calls) == 2 * n
+
+
+def test_o_recuo_tem_teto_de_3_horas(db):
+    db.set_state("empty_rounds", "20")
+    db.set_state("last_attempt", NOW.isoformat())
+    fora = FakeCollector("fake", {u: FetchError("x") for u in (A1, A2, B1)})
+    runner.tick(make_config(), db, {"fake": fora}, Sink(), NOW + timedelta(hours=3, minutes=1))
+    assert fora.calls  # nem com 20 falhas seguidas espera mais de 3 h
+
+
+def test_volta_ao_normal_quando_uma_pagina_e_lida(db):
+    cfg = make_config()
+    db.set_state("empty_rounds", "3")
+    ok = FakeCollector("fake", {A1: good("a", A1, 500.0), A2: good("a", A2, 500.0), B1: good("b", B1, 500.0)})
+    runner.tick(cfg, db, {"fake": ok}, Sink(), NOW)
+    assert db.get_state("empty_rounds") is None and db.get_state("last_collect") == NOW.isoformat()

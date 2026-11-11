@@ -16,7 +16,7 @@ from .heartbeat import make_heartbeat
 from .secrets import env_or_file
 from .web import serve
 from .notify import ConsoleNotifier, NtfyNotifier
-from .runner import run_collection, tick
+from .runner import reset_stale_state, run_collection, tick
 from .summary import build_summary
 
 
@@ -114,7 +114,7 @@ def main(argv=None) -> int:
         print(run_collection(cfg, db, _collectors(cfg, db), notifier, now))
     else:
         collectors = _collectors(cfg, db)
-        db.del_state("last_attempt")  # reiniciou: se faltou coletar, tenta já (sem esperar o intervalo mínimo)
+        reset_stale_state(db)  # reiniciou: se nunca coletou direito, tenta já
         hc = env_or_file("HEALTHCHECK_URL")
         port = int(os.environ.get("PORT", "8080"))
         serve(cfg, args.db, port)
