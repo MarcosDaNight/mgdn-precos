@@ -8,9 +8,9 @@ import time
 from datetime import datetime, timezone
 
 from . import config as config_mod
-from .collectors.http import PoliteClient
+from .collectors.http import FetchError, PoliteClient
 from .collectors.kabum import KabumCollector
-from .collectors.mercadolivre import MercadoLivreCollector, MLAuth
+from .collectors.mercadolivre import MercadoLivreCollector, MLAuth, ParseError
 from .db import DB
 from .heartbeat import make_heartbeat
 from .secrets import env_or_file
@@ -58,12 +58,14 @@ def _ml_command(args, cfg, db) -> int:
         auth.exchange_code(args.code)
         print("tokens gravados no banco")
         return 0
-    from . import filters
-    product = next((p for p in cfg.products if args.url in p.stores.get("mercadolivre", ())), cfg.products[0])
-    offer = MercadoLivreCollector(auth, cfg.user_agent).fetch(product, args.url)
-    verdict = filters.evaluate(product, offer, cfg.default_forbidden)
-    print(offer)
-    print(f"produto avaliado: {product.id} | filtros: {'ACEITA' if verdict.ok else 'RECUSA: ' + str(verdict.reason)}")
+    from . import report
+    try:
+        offer = MercadoLivreCollector(auth, cfg.user_agent).fetch(cfg.products[0], args.url)  # o produto só rotula a oferta
+    except (FetchError, ParseError) as e:
+        print(f"ERRO: {e}")
+        return 1
+    print(report.format_offer(offer))
+    print("\n".join(report.verdict_lines(offer, cfg, only=args.product)))
     return 0
 
 
@@ -82,6 +84,7 @@ def main(argv=None) -> int:
     ma.add_argument("code")
     mc = sub.add_parser("ml-check", help="lê UM anúncio pela API e mostra o que os filtros decidem")
     mc.add_argument("url")
+    mc.add_argument("--product", help="avalia só contra este produto (padrão: todos)")
     en = sub.add_parser("enable", help="reativa uma loja desativada por bloqueio")
     en.add_argument("store")
     args = ap.parse_args(argv)

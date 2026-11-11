@@ -32,7 +32,7 @@ products:
   - id: console
     name: Console Nintendo Switch 2 256 GB
     category: console
-    required: ["switch 2", "console", "256"]
+    required: ["switch 2", "console"]  # só existe o de 256 GB: o título não precisa dizer
     forbidden: [bundle, kit, jogo, "mario kart", pokemon, zelda, "fc 27", "sports resort", edicao, anniversary]
     target: { pix: 3700, installment: 3800 }   # preço de rua, não o sugerido
     stores:
@@ -42,7 +42,7 @@ products:
   - id: pro-controller
     name: Nintendo Switch 2 Pro Controller (oficial)
     category: accessory
-    required: ["switch 2", "pro controller"]
+    required: ["switch 2", "controle", "pro"]  # "Controle ... Pro" ou "Pro Controller"
     forbidden: [resident, anniversary, "40th", feir, base, stand]
     target: 500
     stores: {}   # 10/11: os anúncios da KaBuM são todos de terceiros (marketplace); entra pelo Mercado Livre
